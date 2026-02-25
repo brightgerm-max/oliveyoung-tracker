@@ -1,5 +1,5 @@
 """
-올리브영 랭킹 수집기 — 스킨케어 진단 버전
+올리브영 랭킹 수집기 + 상품 뷰어 수 트래커 — 최종 버전
 """
 
 import os
@@ -13,7 +13,11 @@ from playwright.sync_api import sync_playwright
 
 GAS_WEB_APP_URL = os.environ.get("GAS_WEB_APP_URL", "")
 SECRET          = os.environ.get("SECRET", "oliveyoung_secret_2026")
-KST             = timezone(timedelta(hours=9))
+
+CATEGORIES = [
+    {"name": "전체TOP100", "catNo": "900000100100001"},
+    {"name": "스킨케어",   "catNo": "900000100100002"},
+]
 
 VIEWER_PRODUCTS = [
     {
@@ -27,35 +31,63 @@ VIEWER_PRODUCTS = [
 ]
 
 TOP_N = 100
+KST   = timezone(timedelta(hours=9))
 
 
-def fetch_viewer_count(product: dict, context) -> dict:
+def make_context(p):
+    browser = p.chromium.launch(
+        headless=True,
+        args=["--no-sandbox", "--disable-dev-shm-usage",
+              "--disable-blink-features=AutomationControlled"],
+    )
+    context = browser.new_context(
+        user_agent=(
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+        ),
+        locale="ko-KR",
+        viewport={"width": 1280, "height": 900},
+        extra_http_headers={"Accept-Language": "ko-KR,ko;q=0.9"},
+    )
+    context.add_init_script(
+        "Object.defineProperty(navigator,'webdriver',{get:()=>undefined});"
+    )
+    return browser, context
+
+
+def fetch_ranking(cat_no: str, context) -> list:
+    url = (
+        "https://www.oliveyoung.co.kr/store/main/getBestList.do"
+        f"?dispCatNo={cat_no}&fltDispCatNo=&pageIdx=0&rowsPerPage=0"
+    )
     page = context.new_page()
     try:
-        page.goto(product["url"], wait_until="domcontentloaded", timeout=30000)
         try:
-            page.wait_for_selector("[class*='viewer-count'] em, [class*='viewerCount'] em", timeout=10000)
+            page.goto(url, wait_until="domcontentloaded", timeout=30000)
         except Exception:
-            time.sleep(3)
+            pass
+
+        # wait_for_selector 실패해도 계속 진행
+        try:
+            page.wait_for_selector(".prd_info", timeout=15000)
+        except Exception:
+            print("  .prd_info 대기 초과 — 추가 5초 대기 후 파싱")
+            time.sleep(5)
+
         html = page.content()
-        soup = BeautifulSoup(html, "html.parser")
-        name_el = (
-            soup.select_one("[data-qa-name='text-product-title']") or
-            soup.select_one("[class*='title-area'] p") or
-            soup.select_one("[class*='GoodsDetail'] h2")
-        )
-        product_name = name_el.get_text(strip=True) if name_el else product["name"]
-        viewer_el = (
-            soup.select_one("[class*='viewer-count'] em") or
-            soup.select_one("[class*='viewerCount'] em") or
-            soup.select_one("[class*='viewer_count'] em")
-        )
-        viewer_count = int(viewer_el.get_text(strip=True).replace(",", "")) if viewer_el else 0
-        print(f"  [{product['name'][:20]}...] 뷰어: {viewer_count}명")
-        return {"productName": product_name, "url": product["url"], "viewerCount": viewer_count}
-    except Exception as e:
-        print(f"  뷰어 수집 실패: {e}")
-        return {"productName": product["name"], "url": product["url"], "viewerCount": 0}
+        items = parse_ranking_html(html)
+
+        # 0건이면 한 번 더 시도
+        if not items:
+            print("  0건 — 페이지 재로드 후 재시도")
+            try:
+                page.reload(wait_until="domcontentloaded", timeout=30000)
+                time.sleep(5)
+            except Exception:
+                pass
+            items = parse_ranking_html(page.content())
+
+        return items
     finally:
         page.close()
 
@@ -97,6 +129,37 @@ def parse_ranking_html(html: str) -> list:
     return items
 
 
+def fetch_viewer_count(product: dict, context) -> dict:
+    page = context.new_page()
+    try:
+        page.goto(product["url"], wait_until="domcontentloaded", timeout=30000)
+        try:
+            page.wait_for_selector("[class*='viewer-count'] em, [class*='viewerCount'] em", timeout=10000)
+        except Exception:
+            time.sleep(3)
+        html = page.content()
+        soup = BeautifulSoup(html, "html.parser")
+        name_el = (
+            soup.select_one("[data-qa-name='text-product-title']") or
+            soup.select_one("[class*='title-area'] p") or
+            soup.select_one("[class*='GoodsDetail'] h2")
+        )
+        product_name = name_el.get_text(strip=True) if name_el else product["name"]
+        viewer_el = (
+            soup.select_one("[class*='viewer-count'] em") or
+            soup.select_one("[class*='viewerCount'] em") or
+            soup.select_one("[class*='viewer_count'] em")
+        )
+        viewer_count = int(viewer_el.get_text(strip=True).replace(",", "")) if viewer_el else 0
+        print(f"  [{product['name'][:20]}...] 뷰어: {viewer_count}명")
+        return {"productName": product_name, "url": product["url"], "viewerCount": viewer_count}
+    except Exception as e:
+        print(f"  뷰어 수집 실패: {e}")
+        return {"productName": product["name"], "url": product["url"], "viewerCount": 0}
+    finally:
+        page.close()
+
+
 def main():
     if not GAS_WEB_APP_URL:
         print("❌ GAS_WEB_APP_URL 환경변수가 없습니다.")
@@ -111,119 +174,46 @@ def main():
     viewer_rows = []
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(
-            headless=True,
-            args=["--no-sandbox", "--disable-dev-shm-usage",
-                  "--disable-blink-features=AutomationControlled"],
-        )
-        context = browser.new_context(
-            user_agent=(
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
-            ),
-            locale="ko-KR",
-            viewport={"width": 1280, "height": 900},
-            extra_http_headers={"Accept-Language": "ko-KR,ko;q=0.9"},
-        )
-        context.add_init_script(
-            "Object.defineProperty(navigator,'webdriver',{get:()=>undefined});"
-        )
+        browser, context = make_context(p)
 
         # 메인 페이지 선방문
+        print("  메인 페이지 방문 중...")
         warmup = context.new_page()
         try:
             warmup.goto("https://www.oliveyoung.co.kr/store/main/main.do",
                         wait_until="domcontentloaded", timeout=20000)
-            time.sleep(1)
+            time.sleep(2)
         except Exception as e:
-            print(f"  메인 방문 실패: {e}")
+            print(f"  메인 방문 실패 (무시): {e}")
         finally:
             warmup.close()
 
-        # 전체TOP100 수집
-        print("  [전체TOP100] 수집 중...")
-        page1 = context.new_page()
-        try:
-            page1.goto(
-                "https://www.oliveyoung.co.kr/store/main/getBestList.do?dispCatNo=900000100100001&fltDispCatNo=&pageIdx=0&rowsPerPage=0",
-                wait_until="domcontentloaded", timeout=30000
-            )
-            page1.wait_for_selector(".prd_info", timeout=15000)
-            items = parse_ranking_html(page1.content())
-            print(f"  [전체TOP100] ✅ {len(items)}건")
-            for item in items:
-                all_rows.append({"dateStr": date_str, "timeStr": time_str, "category": "전체TOP100", **item})
-        except Exception as e:
-            print(f"  [전체TOP100] 실패: {e}")
-        finally:
-            page1.close()
-
-        time.sleep(3)
-
-        # 스킨케어: 전체TOP100 먼저 방문 후 카테고리 클릭 방식으로 우회
-        print("  [스킨케어] 수집 중... (랭킹 페이지 → 카테고리 필터 방식)")
-        page2 = context.new_page()
-        try:
-            # 1. 전체 랭킹 페이지 먼저 로드
-            page2.goto(
-                "https://www.oliveyoung.co.kr/store/main/getBestList.do?dispCatNo=900000100100001&fltDispCatNo=&pageIdx=0&rowsPerPage=0",
-                wait_until="domcontentloaded", timeout=30000
-            )
-            page2.wait_for_selector(".prd_info", timeout=15000)
-            print("  전체 랭킹 로드 완료, 스킨케어 URL로 이동...")
-            time.sleep(2)
-
-            # 2. 스킨케어 URL로 이동
-            page2.goto(
-                "https://www.oliveyoung.co.kr/store/main/getBestList.do?dispCatNo=900000100100002&fltDispCatNo=&pageIdx=0&rowsPerPage=0",
-                wait_until="domcontentloaded", timeout=30000
-            )
-
-            # 3. .prd_info 대기
+        # 랭킹 수집
+        for cat in CATEGORIES:
+            print(f"  [{cat['name']}] 수집 중...")
             try:
-                page2.wait_for_selector(".prd_info", timeout=15000)
-            except Exception:
-                print("  대기 초과 — 5초 더 기다린 후 파싱")
-                time.sleep(5)
-
-            html = page2.content()
-            soup = BeautifulSoup(html, "html.parser")
-
-            # 진단 출력
-            print(f"  페이지 타이틀: {page2.title()}")
-            print(f"  HTML 길이: {len(html)}자")
-            for sel in [".prd_info", ".cate_prd_list", ".tx_brand", "[class*='prd']", "[class*='ranking']", "[class*='best']"]:
-                cnt = len(soup.select(sel))
-                if cnt > 0:
-                    print(f"  ✅ [{sel}]: {cnt}개")
-            # HTML 중간 부분 출력 (상품목록이 있을 법한 곳)
-            idx = html.find("prd_info")
-            if idx == -1:
-                idx = html.find("cate_prd")
-            if idx > 0:
-                print(f"  prd_info 발견 위치: {idx}")
-                print(f"  주변 HTML:\n{html[max(0,idx-100):idx+300]}")
-            else:
-                print("  ⚠️ prd_info 텍스트 자체가 HTML에 없음 → JS 렌더링 미완료")
-                print(f"  HTML 중간부분 샘플:\n{html[500000:500300]}")
-
-            items = parse_ranking_html(html)
-            print(f"  [스킨케어] ✅ {len(items)}건")
-            for item in items:
-                all_rows.append({"dateStr": date_str, "timeStr": time_str, "category": "스킨케어", **item})
-        except Exception as e:
-            print(f"  [스킨케어] 실패: {e}")
-        finally:
-            page2.close()
+                items = fetch_ranking(cat["catNo"], context)
+                print(f"  [{cat['name']}] ✅ {len(items)}건")
+                for item in items:
+                    all_rows.append({
+                        "dateStr":  date_str,
+                        "timeStr":  time_str,
+                        "category": cat["name"],
+                        **item,
+                    })
+            except Exception as e:
+                print(f"  [{cat['name']}] ⚠️ 실패: {e}")
+            time.sleep(3)
 
         # 뷰어 수 수집
         print("\n  뷰어 수 수집 시작...")
         for product in VIEWER_PRODUCTS:
             result = fetch_viewer_count(product, context)
             viewer_rows.append({
-                "dateStr": date_str, "timeStr": time_str,
+                "dateStr":     date_str,
+                "timeStr":     time_str,
                 "productName": result["productName"],
-                "url": result["url"],
+                "url":         result["url"],
                 "viewerCount": result["viewerCount"],
             })
             time.sleep(2)
