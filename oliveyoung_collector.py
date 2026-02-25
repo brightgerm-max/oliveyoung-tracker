@@ -14,20 +14,18 @@ from playwright.sync_api import sync_playwright
 GAS_WEB_APP_URL = os.environ.get("GAS_WEB_APP_URL", "")
 SECRET          = os.environ.get("SECRET", "oliveyoung_secret_2026")
 
-# ── 랭킹 수집 카테고리 ──
 CATEGORIES = [
     {"name": "전체TOP100", "catNo": "900000100100001"},
     {"name": "스킨케어",   "catNo": "900000100100002"},
 ]
 
-# ── 뷰어 수 모니터링 상품 ──
 VIEWER_PRODUCTS = [
     {
-        "name": "[화잘먹] 구달 맑은 어성초 진정 수분 선크림 50ml 1+1 기획 (+25ml 미니어처)",  # ★ 원하는 상품명으로 변경
+        "name": "[화잘먹] 구달 맑은 어성초 진정 수분 선크림 50ml 1+1 기획 (+25ml 미니어처)",
         "url":  "https://www.oliveyoung.co.kr/store/goods/getGoodsDetail.do?goodsNo=A000000219553",
     },
     {
-        "name": "[규진마켓/진정커버] 구달 어성초 진정 블레미쉬 커버 선비비 뉴트럴 베이지 50ml 기획 (+25ml)",  # ★ 원하는 상품명으로 변경
+        "name": "[규진마켓/진정커버] 구달 어성초 진정 블레미쉬 커버 선비비 뉴트럴 베이지 50ml 기획 (+25ml)",
         "url":  "https://www.oliveyoung.co.kr/store/goods/getGoodsDetail.do?goodsNo=A000000248065",
     },
 ]
@@ -36,9 +34,6 @@ TOP_N = 100
 KST   = timezone(timedelta(hours=9))
 
 
-# ─────────────────────────────────────────
-# 랭킹 수집
-# ─────────────────────────────────────────
 def fetch_ranking(cat_no: str, page) -> list:
     url = (
         "https://www.oliveyoung.co.kr/store/main/getBestList.do"
@@ -98,58 +93,34 @@ def parse_ranking_html(html: str) -> list:
     return items
 
 
-# ─────────────────────────────────────────
-# 뷰어 수 수집
-# ─────────────────────────────────────────
 def fetch_viewer_count(product: dict, page) -> dict:
     try:
         page.goto(product["url"], wait_until="domcontentloaded", timeout=30000)
-
-        # 뷰어 카운트 요소 대기
         try:
             page.wait_for_selector("[class*='viewer-count'] em, [class*='viewerCount'] em", timeout=10000)
         except Exception:
-            # 셀렉터가 다를 수 있으니 잠시 대기 후 파싱 시도
             time.sleep(3)
-
         html = page.content()
         soup = BeautifulSoup(html, "html.parser")
-
-        # 상품명 수집 (자동으로 채우기 위해)
         name_el = (
             soup.select_one("[data-qa-name='text-product-title']") or
             soup.select_one("[class*='title-area'] p") or
             soup.select_one("[class*='GoodsDetail'] h2")
         )
         product_name = name_el.get_text(strip=True) if name_el else product["name"]
-
-        # 뷰어 수 — class에 'viewer-count' 또는 'viewerCount' 포함된 요소의 em 태그
         viewer_el = (
             soup.select_one("[class*='viewer-count'] em") or
             soup.select_one("[class*='viewerCount'] em") or
             soup.select_one("[class*='viewer_count'] em")
         )
         viewer_count = int(viewer_el.get_text(strip=True).replace(",", "")) if viewer_el else 0
-
         print(f"  [{product['name']}] 뷰어: {viewer_count}명")
-        return {
-            "productName": product_name,
-            "url":         product["url"],
-            "viewerCount": viewer_count,
-        }
-
+        return {"productName": product_name, "url": product["url"], "viewerCount": viewer_count}
     except Exception as e:
         print(f"  [{product['name']}] 뷰어 수집 실패: {e}")
-        return {
-            "productName": product["name"],
-            "url":         product["url"],
-            "viewerCount": 0,
-        }
+        return {"productName": product["name"], "url": product["url"], "viewerCount": 0}
 
 
-# ─────────────────────────────────────────
-# 메인
-# ─────────────────────────────────────────
 def main():
     if not GAS_WEB_APP_URL:
         print("❌ GAS_WEB_APP_URL 환경변수가 없습니다.")
@@ -160,8 +131,8 @@ def main():
     time_str = now.strftime("%H:%M")
     print(f"[{date_str} {time_str} KST] 수집 시작")
 
-    all_rows     = []
-    viewer_rows  = []
+    all_rows    = []
+    viewer_rows = []
 
     with sync_playwright() as p:
         browser = p.chromium.launch(
@@ -192,22 +163,34 @@ def main():
         except Exception as e:
             print(f"  메인 페이지 방문 실패 (무시): {e}")
 
-        # 랭킹 수집
-        for cat in CATEGORIES:
-            print(f"  [{cat['name']}] 수집 중...")
-            try:
-                items = fetch_ranking(cat["catNo"], page)
-                print(f"  [{cat['name']}] ✅ {len(items)}건")
-                for item in items:
-                    all_rows.append({
-                        "dateStr":  date_str,
-                        "timeStr":  time_str,
-                        "category": cat["name"],
-                        **item,
-                    })
-                time.sleep(2)
-            except Exception as e:
-                print(f"  [{cat['name']}] ⚠️ 실패: {e}")
+        # 전체TOP100 — 기존 page 사용
+        print(f"  [전체TOP100] 수집 중...")
+        try:
+            items = fetch_ranking("900000100100001", page)
+            print(f"  [전체TOP100] ✅ {len(items)}건")
+            for item in items:
+                all_rows.append({"dateStr": date_str, "timeStr": time_str,
+                                 "category": "전체TOP100", **item})
+        except Exception as e:
+            print(f"  [전체TOP100] ⚠️ 실패: {e}")
+
+        time.sleep(2)
+
+        # 스킨케어 — 새 page로 수집 (이전 page 상태 영향 차단)
+        print(f"  [스킨케어] 수집 중...")
+        skin_page = context.new_page()
+        try:
+            items = fetch_ranking("900000100100002", skin_page)
+            print(f"  [스킨케어] ✅ {len(items)}건")
+            for item in items:
+                all_rows.append({"dateStr": date_str, "timeStr": time_str,
+                                 "category": "스킨케어", **item})
+        except Exception as e:
+            print(f"  [스킨케어] ⚠️ 실패: {e}")
+        finally:
+            skin_page.close()
+
+        time.sleep(2)
 
         # 뷰어 수 수집
         print("\n  뷰어 수 수집 시작...")
@@ -228,18 +211,12 @@ def main():
         print("❌ 수집된 데이터 없음")
         sys.exit(1)
 
-    # GAS로 전송
     print(f"\n  GAS 전송 중... (랭킹 {len(all_rows)}건 + 뷰어 {len(viewer_rows)}건)")
     try:
         resp = requests.post(
             GAS_WEB_APP_URL,
-            json={
-                "secret":     SECRET,
-                "dateStr":    date_str,
-                "timeStr":    time_str,
-                "rows":       all_rows,
-                "viewerRows": viewer_rows,
-            },
+            json={"secret": SECRET, "dateStr": date_str, "timeStr": time_str,
+                  "rows": all_rows, "viewerRows": viewer_rows},
             timeout=60,
         )
         result = resp.json()
