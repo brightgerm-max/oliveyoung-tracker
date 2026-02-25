@@ -1,6 +1,6 @@
 """
 올리브영 랭킹 수집기 — GitHub Actions 실행용
-실제 셀렉터: .cate_prd_list li.flag
+셀렉터: .prd_info 기준 (100개 확인됨)
 """
 
 import os
@@ -34,29 +34,32 @@ def fetch_ranking(cat_no: str, page) -> list:
 
 
 def parse_html(html: str) -> list:
-    soup = BeautifulSoup(html, "html.parser")
+    soup  = BeautifulSoup(html, "html.parser")
 
-    # 실제 셀렉터: .cate_prd_list 안의 li.flag
-    li_list = soup.select(".cate_prd_list li.flag")
+    # .prd_info 100개 확인됨 → 각각의 부모(li)를 상품 단위로 사용
+    prd_infos = soup.select(".cate_prd_list .prd_info")
 
-    # 혹시 못 찾으면 .prd_info 부모 li로 폴백
-    if not li_list:
-        li_list = [el.parent for el in soup.select(".prd_info") if el.parent]
+    # cate_prd_list 안에서 못 찾으면 전체에서 탐색
+    if not prd_infos:
+        prd_infos = soup.select(".prd_info")
 
-    print(f"  li 후보 {len(li_list)}개 발견")
+    print(f"  .prd_info {len(prd_infos)}개 발견")
 
     items = []
-    for idx, li in enumerate(li_list[:TOP_N]):
+    for idx, info in enumerate(prd_infos[:TOP_N]):
         try:
-            brand_el  = li.select_one(".tx_brand")
-            name_el   = li.select_one(".tx_name")
+            # 상품 컨테이너 = prd_info 자신 또는 부모 li
+            container = info.parent if info.parent.name == "li" else info
+
+            brand_el  = info.select_one(".tx_brand")
+            name_el   = info.select_one(".tx_name")
             brand     = brand_el.get_text(strip=True) if brand_el else ""
             name      = name_el.get_text(strip=True)  if name_el  else ""
             if not brand and not name:
                 continue
 
-            cur_el    = li.select_one(".tx_cur .tx_num")
-            org_el    = li.select_one(".tx_org .tx_num")
+            cur_el    = info.select_one(".tx_cur .tx_num")
+            org_el    = info.select_one(".tx_org .tx_num")
             cur_price = int(cur_el.get_text(strip=True).replace(",", "")) if cur_el else 0
             org_price = int(org_el.get_text(strip=True).replace(",", "")) if org_el else cur_price
             discount  = (
@@ -64,10 +67,8 @@ def parse_html(html: str) -> list:
                 if org_price > 0 and cur_price > 0 and org_price != cur_price else 0
             )
 
-            # 옵션 플래그 — li 안의 아이콘 클래스로 판별
-            li_classes = " ".join(li.get("class", []))
-            all_text   = str(li)
-
+            # 옵션 플래그는 컨테이너(li) 전체 HTML에서 탐색
+            scope = str(container)
             items.append({
                 "rank":        idx + 1,
                 "brand":       brand,
@@ -75,10 +76,10 @@ def parse_html(html: str) -> list:
                 "curPrice":    cur_price,
                 "orgPrice":    org_price,
                 "discount":    discount,
-                "hasSale":     "Y" if "icon_flag sale"     in all_text or "flag sale"     in all_text else "",
-                "hasCoupon":   "Y" if "icon_flag coupon"   in all_text or "flag coupon"   in all_text else "",
-                "hasGift":     "Y" if "icon_flag gift"     in all_text or "flag gift"     in all_text else "",
-                "hasDelivery": "Y" if "icon_flag delivery" in all_text or "flag delivery" in all_text else "",
+                "hasSale":     "Y" if "sale"     in scope else "",
+                "hasCoupon":   "Y" if "coupon"   in scope else "",
+                "hasGift":     "Y" if "gift"     in scope else "",
+                "hasDelivery": "Y" if "delivery" in scope else "",
             })
         except Exception as e:
             print(f"  파싱 오류 (idx={idx}): {e}")
