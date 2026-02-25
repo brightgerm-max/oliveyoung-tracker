@@ -1,5 +1,5 @@
 """
-올리브영 랭킹 수집기 + 상품 뷰어 수 트래커 — 스킨케어 HTML 진단 버전
+올리브영 랭킹 수집기 + 상품 뷰어 수 트래커 — 최종 버전
 """
 
 import os
@@ -13,6 +13,11 @@ from playwright.sync_api import sync_playwright
 
 GAS_WEB_APP_URL = os.environ.get("GAS_WEB_APP_URL", "")
 SECRET          = os.environ.get("SECRET", "oliveyoung_secret_2026")
+
+CATEGORIES = [
+    {"name": "전체TOP100", "catNo": "900000100100001"},
+    {"name": "스킨케어",   "catNo": "900000100100002"},
+]
 
 VIEWER_PRODUCTS = [
     {
@@ -29,32 +34,31 @@ TOP_N = 100
 KST   = timezone(timedelta(hours=9))
 
 
-def fetch_viewer_count(product: dict, page) -> dict:
+def fetch_ranking(cat_no: str, page, use_networkidle: bool = False) -> list:
+    url = (
+        "https://www.oliveyoung.co.kr/store/main/getBestList.do"
+        f"?dispCatNo={cat_no}&fltDispCatNo=&pageIdx=0&rowsPerPage=0"
+    )
     try:
-        page.goto(product["url"], wait_until="domcontentloaded", timeout=30000)
+        if use_networkidle:
+            # 스킨케어: JS 완전 실행까지 대기
+            page.goto(url, wait_until="networkidle", timeout=45000)
+        else:
+            page.goto(url, wait_until="domcontentloaded", timeout=30000)
+    except Exception:
+        pass
+
+    try:
+        page.wait_for_selector(".prd_info", timeout=15000)
+    except Exception:
+        print("  .prd_info 대기 시간 초과 — 재시도")
+        time.sleep(3)
         try:
-            page.wait_for_selector("[class*='viewer-count'] em, [class*='viewerCount'] em", timeout=10000)
+            page.reload(wait_until="domcontentloaded", timeout=30000)
+            page.wait_for_selector(".prd_info", timeout=10000)
         except Exception:
-            time.sleep(3)
-        html = page.content()
-        soup = BeautifulSoup(html, "html.parser")
-        name_el = (
-            soup.select_one("[data-qa-name='text-product-title']") or
-            soup.select_one("[class*='title-area'] p") or
-            soup.select_one("[class*='GoodsDetail'] h2")
-        )
-        product_name = name_el.get_text(strip=True) if name_el else product["name"]
-        viewer_el = (
-            soup.select_one("[class*='viewer-count'] em") or
-            soup.select_one("[class*='viewerCount'] em") or
-            soup.select_one("[class*='viewer_count'] em")
-        )
-        viewer_count = int(viewer_el.get_text(strip=True).replace(",", "")) if viewer_el else 0
-        print(f"  [{product['name'][:20]}] 뷰어: {viewer_count}명")
-        return {"productName": product_name, "url": product["url"], "viewerCount": viewer_count}
-    except Exception as e:
-        print(f"  뷰어 수집 실패: {e}")
-        return {"productName": product["name"], "url": product["url"], "viewerCount": 0}
+            print("  재시도 실패 — 현재 HTML로 파싱")
+    return parse_ranking_html(page.content())
 
 
 def parse_ranking_html(html: str) -> list:
@@ -92,6 +96,34 @@ def parse_ranking_html(html: str) -> list:
         except Exception as ex:
             print(f"  파싱 오류: {ex}")
     return items
+
+
+def fetch_viewer_count(product: dict, page) -> dict:
+    try:
+        page.goto(product["url"], wait_until="domcontentloaded", timeout=30000)
+        try:
+            page.wait_for_selector("[class*='viewer-count'] em, [class*='viewerCount'] em", timeout=10000)
+        except Exception:
+            time.sleep(3)
+        html = page.content()
+        soup = BeautifulSoup(html, "html.parser")
+        name_el = (
+            soup.select_one("[data-qa-name='text-product-title']") or
+            soup.select_one("[class*='title-area'] p") or
+            soup.select_one("[class*='GoodsDetail'] h2")
+        )
+        product_name = name_el.get_text(strip=True) if name_el else product["name"]
+        viewer_el = (
+            soup.select_one("[class*='viewer-count'] em") or
+            soup.select_one("[class*='viewerCount'] em") or
+            soup.select_one("[class*='viewer_count'] em")
+        )
+        viewer_count = int(viewer_el.get_text(strip=True).replace(",", "")) if viewer_el else 0
+        print(f"  [{product['name']}] 뷰어: {viewer_count}명")
+        return {"productName": product_name, "url": product["url"], "viewerCount": viewer_count}
+    except Exception as e:
+        print(f"  [{product['name']}] 뷰어 수집 실패: {e}")
+        return {"productName": product["name"], "url": product["url"], "viewerCount": 0}
 
 
 def main():
@@ -136,107 +168,61 @@ def main():
         except Exception as e:
             print(f"  메인 페이지 방문 실패 (무시): {e}")
 
-        # 전체TOP100 정상 수집
-        print("  [전체TOP100] 수집 중...")
-        try:
-            url = "https://www.oliveyoung.co.kr/store/main/getBestList.do?dispCatNo=900000100100001&fltDispCatNo=&pageIdx=0&rowsPerPage=0"
-            page.goto(url, wait_until="domcontentloaded", timeout=30000)
+        # 랭킹 수집
+        for cat in CATEGORIES:
+            print(f"  [{cat['name']}] 수집 중...")
             try:
-                page.wait_for_selector(".prd_info", timeout=15000)
-            except Exception:
-                print("  대기 초과 — 재시도")
-                time.sleep(3)
-                page.reload(wait_until="domcontentloaded", timeout=30000)
-                try:
-                    page.wait_for_selector(".prd_info", timeout=10000)
-                except Exception:
-                    print("  재시도 실패")
-            items = parse_ranking_html(page.content())
-            print(f"  [전체TOP100] ✅ {len(items)}건")
-            for item in items:
-                all_rows.append({"dateStr": date_str, "timeStr": time_str, "category": "전체TOP100", **item})
-        except Exception as e:
-            print(f"  [전체TOP100] ⚠️ 실패: {e}")
-
-        time.sleep(2)
-
-        # ── 스킨케어 HTML 진단 ──
-        print("\n  [스킨케어 진단] HTML 구조 확인 중...")
-        skin_url = "https://www.oliveyoung.co.kr/store/main/getBestList.do?dispCatNo=900000100100002&fltDispCatNo=&pageIdx=0&rowsPerPage=0"
-        try:
-            page.goto(skin_url, wait_until="domcontentloaded", timeout=30000)
-            try:
-                page.wait_for_selector(".prd_info", timeout=15000)
-            except Exception:
-                print("  .prd_info 대기 초과 — 5초 추가 대기")
-                time.sleep(5)
-
-            html = page.content()
-            soup = BeautifulSoup(html, "html.parser")
-
-            print(f"  HTML 길이: {len(html)}자")
-            print(f"  페이지 타이틀: {page.title()}")
-
-            # 셀렉터 전수 조사
-            candidates = [
-                ".prd_info", ".cate_prd_list", ".tx_brand", ".tx_name",
-                "li.flag", ".prd_list", "[class*='prd']",
-                "[class*='rank']", "[class*='best']", "[class*='item']",
-            ]
-            print("\n  === 셀렉터 조사 ===")
-            for sel in candidates:
-                cnt = len(soup.select(sel))
-                if cnt > 0:
-                    print(f"  ✅ {sel}: {cnt}개")
-                else:
-                    print(f"  ❌ {sel}: 0개")
-
-            # prd_info 텍스트가 HTML에 있는지 확인
-            if "prd_info" in html:
-                idx = html.find("prd_info")
-                print(f"\n  ⚠️ prd_info 텍스트는 있음 (위치: {idx}) — BS4 파싱 문제")
-                print(f"  주변 HTML:\n{html[max(0,idx-50):idx+200]}")
-            else:
-                print("\n  ❌ prd_info 텍스트 자체가 HTML에 없음 — JS 미렌더링")
-                # URL 파라미터가 다른지 확인용으로 현재 URL 출력
-                print(f"  현재 URL: {page.url}")
-                # HTML 샘플 출력
-                print(f"\n  HTML 샘플 (100000~100300):\n{html[100000:100300]}")
-
-        except Exception as e:
-            print(f"  스킨케어 진단 실패: {e}")
+                # 스킨케어는 networkidle로 JS 완전 실행 대기
+                use_ni = (cat["name"] == "스킨케어")
+                items = fetch_ranking(cat["catNo"], page, use_networkidle=use_ni)
+                print(f"  [{cat['name']}] ✅ {len(items)}건")
+                for item in items:
+                    all_rows.append({
+                        "dateStr":  date_str,
+                        "timeStr":  time_str,
+                        "category": cat["name"],
+                        **item,
+                    })
+                time.sleep(2)
+            except Exception as e:
+                print(f"  [{cat['name']}] ⚠️ 실패: {e}")
 
         # 뷰어 수 수집
         print("\n  뷰어 수 수집 시작...")
         for product in VIEWER_PRODUCTS:
             result = fetch_viewer_count(product, page)
             viewer_rows.append({
-                "dateStr": date_str, "timeStr": time_str,
+                "dateStr":     date_str,
+                "timeStr":     time_str,
                 "productName": result["productName"],
-                "url": result["url"],
+                "url":         result["url"],
                 "viewerCount": result["viewerCount"],
             })
             time.sleep(2)
 
         browser.close()
 
-    # all_rows가 있으면 GAS 전송
-    if all_rows or viewer_rows:
-        print(f"\n  GAS 전송 중... (랭킹 {len(all_rows)}건 + 뷰어 {len(viewer_rows)}건)")
-        try:
-            resp = requests.post(
-                GAS_WEB_APP_URL,
-                json={"secret": SECRET, "dateStr": date_str, "timeStr": time_str,
-                      "rows": all_rows, "viewerRows": viewer_rows},
-                timeout=60,
-            )
-            result = resp.json()
-            if result.get("ok"):
-                print(f"  ✅ 저장 완료: 랭킹 {result.get('saved')}건 / 뷰어 {result.get('viewerSaved')}건")
-            else:
-                print(f"  ❌ GAS 오류: {result.get('error')}")
-        except Exception as e:
-            print(f"  ❌ 전송 실패: {e}")
+    if not all_rows and not viewer_rows:
+        print("❌ 수집된 데이터 없음")
+        sys.exit(1)
+
+    print(f"\n  GAS 전송 중... (랭킹 {len(all_rows)}건 + 뷰어 {len(viewer_rows)}건)")
+    try:
+        resp = requests.post(
+            GAS_WEB_APP_URL,
+            json={"secret": SECRET, "dateStr": date_str, "timeStr": time_str,
+                  "rows": all_rows, "viewerRows": viewer_rows},
+            timeout=60,
+        )
+        result = resp.json()
+        if result.get("ok"):
+            print(f"  ✅ 저장 완료: 랭킹 {result.get('saved')}건 / 뷰어 {result.get('viewerSaved')}건")
+        else:
+            print(f"  ❌ GAS 오류: {result.get('error')}")
+            sys.exit(1)
+    except Exception as e:
+        print(f"  ❌ 전송 실패: {e}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
