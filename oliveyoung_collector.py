@@ -15,8 +15,14 @@ GAS_WEB_APP_URL = os.environ.get("GAS_WEB_APP_URL", "")
 SECRET          = os.environ.get("SECRET", "oliveyoung_secret_2026")
 
 CATEGORIES = [
-    {"name": "전체TOP100", "catNo": "900000100100001"},
-    {"name": "스킨케어",   "catNo": "900000100100002"},
+    {
+        "name":   "전체TOP100",
+        "url":    "https://www.oliveyoung.co.kr/store/main/getBestList.do?dispCatNo=900000100100001&fltDispCatNo=&pageIdx=0&rowsPerPage=0",
+    },
+    {
+        "name":   "스킨케어",
+        "url":    "https://www.oliveyoung.co.kr/store/main/getBestList.do?dispCatNo=900000100100001&fltDispCatNo=10000010001&pageIdx=0&rowsPerPage=0",
+    },
 ]
 
 VIEWER_PRODUCTS = [
@@ -34,20 +40,11 @@ TOP_N = 100
 KST   = timezone(timedelta(hours=9))
 
 
-def fetch_ranking(cat_no: str, page, use_networkidle: bool = False) -> list:
-    url = (
-        "https://www.oliveyoung.co.kr/store/main/getBestList.do"
-        f"?dispCatNo={cat_no}&fltDispCatNo=&pageIdx=0&rowsPerPage=0"
-    )
+def fetch_ranking(url: str, page) -> list:
     try:
-        if use_networkidle:
-            # 스킨케어: JS 완전 실행까지 대기
-            page.goto(url, wait_until="networkidle", timeout=45000)
-        else:
-            page.goto(url, wait_until="domcontentloaded", timeout=30000)
+        page.goto(url, wait_until="domcontentloaded", timeout=30000)
     except Exception:
         pass
-
     try:
         page.wait_for_selector(".prd_info", timeout=15000)
     except Exception:
@@ -172,9 +169,7 @@ def main():
         for cat in CATEGORIES:
             print(f"  [{cat['name']}] 수집 중...")
             try:
-                # 스킨케어는 networkidle로 JS 완전 실행 대기
-                use_ni = (cat["name"] == "스킨케어")
-                items = fetch_ranking(cat["catNo"], page, use_networkidle=use_ni)
+                items = fetch_ranking(cat["url"], page)
                 print(f"  [{cat['name']}] ✅ {len(items)}건")
                 for item in items:
                     all_rows.append({
