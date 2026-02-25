@@ -192,8 +192,20 @@ def main():
             # 진단 출력
             print(f"  페이지 타이틀: {page2.title()}")
             print(f"  HTML 길이: {len(html)}자")
-            for sel in [".prd_info", ".cate_prd_list", ".tx_brand"]:
-                print(f"  셀렉터 [{sel}]: {len(soup.select(sel))}개")
+            for sel in [".prd_info", ".cate_prd_list", ".tx_brand", "[class*='prd']", "[class*='ranking']", "[class*='best']"]:
+                cnt = len(soup.select(sel))
+                if cnt > 0:
+                    print(f"  ✅ [{sel}]: {cnt}개")
+            # HTML 중간 부분 출력 (상품목록이 있을 법한 곳)
+            idx = html.find("prd_info")
+            if idx == -1:
+                idx = html.find("cate_prd")
+            if idx > 0:
+                print(f"  prd_info 발견 위치: {idx}")
+                print(f"  주변 HTML:\n{html[max(0,idx-100):idx+300]}")
+            else:
+                print("  ⚠️ prd_info 텍스트 자체가 HTML에 없음 → JS 렌더링 미완료")
+                print(f"  HTML 중간부분 샘플:\n{html[500000:500300]}")
 
             items = parse_ranking_html(html)
             print(f"  [스킨케어] ✅ {len(items)}건")
