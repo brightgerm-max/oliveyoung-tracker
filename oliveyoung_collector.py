@@ -23,11 +23,11 @@ CATEGORIES = [
 # ── 뷰어 수 모니터링 상품 ──
 VIEWER_PRODUCTS = [
     {
-        "name": "구달 상품1",  # ★ 원하는 상품명으로 변경
+        "name": "[화잘먹] 구달 맑은 어성초 진정 수분 선크림 50ml 1+1 기획 (+25ml 미니어처)",  # ★ 원하는 상품명으로 변경
         "url":  "https://www.oliveyoung.co.kr/store/goods/getGoodsDetail.do?goodsNo=A000000219553",
     },
     {
-        "name": "구달 상품2",  # ★ 원하는 상품명으로 변경
+        "name": "[규진마켓/진정커버] 구달 어성초 진정 블레미쉬 커버 선비비 뉴트럴 베이지 50ml 기획 (+25ml)",  # ★ 원하는 상품명으로 변경
         "url":  "https://www.oliveyoung.co.kr/store/goods/getGoodsDetail.do?goodsNo=A000000248065",
     },
 ]
