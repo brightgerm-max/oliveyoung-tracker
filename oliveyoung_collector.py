@@ -31,12 +31,8 @@ VIEWER_PRODUCTS = [
         "url":  "https://www.oliveyoung.co.kr/store/goods/getGoodsDetail.do?goodsNo=A000000219553",
     },
     {
-        "name": "[진정커버] 구달 어성초 진정 블레미쉬 커버 선비비 뉴트럴 베이지 50ml 기획 (+25ml)",
+        "name": "[규진마켓/진정커버] 구달 어성초 진정 블레미쉬 커버 선비비 뉴트럴 베이지 50ml 기획 (+25ml)",
         "url":  "https://www.oliveyoung.co.kr/store/goods/getGoodsDetail.do?goodsNo=A000000248065",
-    },
-    {
-        "name": "[3/3하루특가/3월올영픽] 구달 청귤 비타C 잡티케어 세럼 알파 50ml 더블 기획 (+TXA세럼 15ml) | 올리브영",
-        "url":  "https://www.oliveyoung.co.kr/store/goods/getGoodsDetail.do?goodsNo=A000000247774",
     },
 ]
 
@@ -211,7 +207,7 @@ def main():
             GAS_WEB_APP_URL,
             json={"secret": SECRET, "dateStr": date_str, "timeStr": time_str,
                   "rows": all_rows, "viewerRows": viewer_rows},
-            timeout=60,
+            timeout=120,
         )
         result = resp.json()
         if result.get("ok"):
@@ -219,6 +215,9 @@ def main():
         else:
             print(f"  ❌ GAS 오류: {result.get('error')}")
             sys.exit(1)
+    except requests.exceptions.Timeout:
+        # GAS가 처리 중 timeout — 데이터는 저장됐을 가능성 높음
+        print("  ⚠️ 전송 timeout — GAS가 처리 중입니다. 데이터는 저장됐을 수 있습니다.")
     except Exception as e:
         print(f"  ❌ 전송 실패: {e}")
         sys.exit(1)
