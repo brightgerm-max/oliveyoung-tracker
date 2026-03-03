@@ -34,6 +34,10 @@ VIEWER_PRODUCTS = [
         "name": "[규진마켓/진정커버] 구달 어성초 진정 블레미쉬 커버 선비비 뉴트럴 베이지 50ml 기획 (+25ml)",
         "url":  "https://www.oliveyoung.co.kr/store/goods/getGoodsDetail.do?goodsNo=A000000248065",
     },
+    {
+        "name": "[3/3하루특가/3월올영픽] 구달 청귤 비타C 잡티케어 세럼 알파 50ml 더블 기획",
+        "url":  "https://www.oliveyoung.co.kr/store/goods/getGoodsDetail.do?goodsNo=A000000247774",
+    },
 ]
 
 TOP_N = 100
