@@ -31,12 +31,8 @@ VIEWER_PRODUCTS = [
         "url":  "https://www.oliveyoung.co.kr/store/goods/getGoodsDetail.do?goodsNo=A000000219553",
     },
     {
-        "name": "[규진마켓/진정커버] 구달 어성초 진정 블레미쉬 커버 선비비 뉴트럴 베이지 50ml 기획 (+25ml)",
+        "name": "[진정커버] 구달 어성초 진정 블레미쉬 커버 선비비 뉴트럴 베이지 50ml 기획 (+25ml)",
         "url":  "https://www.oliveyoung.co.kr/store/goods/getGoodsDetail.do?goodsNo=A000000248065",
-    },
-    {
-        "name": "[3/3하루특가/3월올영픽] 구달 청귤 비타C 잡티케어 세럼 알파 50ml 더블 기획",
-        "url":  "https://www.oliveyoung.co.kr/store/goods/getGoodsDetail.do?goodsNo=A000000247774",
     },
 ]
 
@@ -149,7 +145,7 @@ def main():
         context = browser.new_context(
             user_agent=(
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36"
             ),
             locale="ko-KR",
             viewport={"width": 1280, "height": 900},
@@ -206,25 +202,26 @@ def main():
         sys.exit(1)
 
     print(f"\n  GAS 전송 중... (랭킹 {len(all_rows)}건 + 뷰어 {len(viewer_rows)}건)")
-    try:
-        resp = requests.post(
-            GAS_WEB_APP_URL,
-            json={"secret": SECRET, "dateStr": date_str, "timeStr": time_str,
-                  "rows": all_rows, "viewerRows": viewer_rows},
-            timeout=120,
-        )
-        result = resp.json()
-        if result.get("ok"):
-            print(f"  ✅ 저장 완료: 랭킹 {result.get('saved')}건 / 뷰어 {result.get('viewerSaved')}건")
-        else:
-            print(f"  ❌ GAS 오류: {result.get('error')}")
-            sys.exit(1)
-    except requests.exceptions.Timeout:
-        # GAS가 처리 중 timeout — 데이터는 저장됐을 가능성 높음
-        print("  ⚠️ 전송 timeout — GAS가 처리 중입니다. 데이터는 저장됐을 수 있습니다.")
-    except Exception as e:
-        print(f"  ❌ 전송 실패: {e}")
-        sys.exit(1)
+    payload = {"secret": SECRET, "dateStr": date_str, "timeStr": time_str,
+               "rows": all_rows, "viewerRows": viewer_rows}
+    max_retries = 3
+    for attempt in range(1, max_retries + 1):
+        try:
+            resp = requests.post(GAS_WEB_APP_URL, json=payload, timeout=60)
+            result = resp.json()
+            if result.get("ok"):
+                print(f"  ✅ 저장 완료: 랭킹 {result.get('saved')}건 / 뷰어 {result.get('viewerSaved')}건")
+                break
+            else:
+                print(f"  ⚠️ GAS 오류 (시도 {attempt}/{max_retries}): {result.get('error')}")
+                if attempt == max_retries:
+                    sys.exit(1)
+                time.sleep(10 * attempt)
+        except Exception as e:
+            print(f"  ⚠️ 전송 실패 (시도 {attempt}/{max_retries}): {e}")
+            if attempt == max_retries:
+                sys.exit(1)
+            time.sleep(10 * attempt)
 
 
 if __name__ == "__main__":
