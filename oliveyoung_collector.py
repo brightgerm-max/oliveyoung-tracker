@@ -207,7 +207,7 @@ def main():
     max_retries = 3
     for attempt in range(1, max_retries + 1):
         try:
-            resp = requests.post(GAS_WEB_APP_URL, json=payload, timeout=60)
+            resp = requests.post(GAS_WEB_APP_URL, json=payload, timeout=180)
             result = resp.json()
             if result.get("ok"):
                 print(f"  ✅ 저장 완료: 랭킹 {result.get('saved')}건 / 뷰어 {result.get('viewerSaved')}건")
