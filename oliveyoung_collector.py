@@ -1,11 +1,14 @@
 """
-올리브영 랭킹 수집기 + 상품 뷰어 수 트래커 — 최종 버전
+올리브영 랭킹 수집기 + 상품 뷰어 수 트래커 — v2 (JSON 저장 + GAS 전송)
 """
 
 import os
 import sys
+import json
 import time
+import subprocess
 from datetime import datetime, timezone, timedelta
+from pathlib import Path
 
 import requests
 from bs4 import BeautifulSoup
@@ -123,6 +126,35 @@ def fetch_viewer_count(product: dict, page) -> dict:
         return {"productName": product["name"], "url": product["url"], "viewerCount": 0}
 
 
+def save_json(date_str: str, time_str: str, rows: list, viewer_rows: list):
+    """수집 데이터를 data/YYYY-MM/YYYY-MM-DD_HHMM.json 으로 저장 + git push"""
+    month_dir = Path("data") / date_str[:7]  # data/2026-03
+    month_dir.mkdir(parents=True, exist_ok=True)
+
+    filename = f"{date_str}_{time_str.replace(':', '')}.json"  # 2026-03-19_1510.json
+    filepath = month_dir / filename
+
+    payload = {
+        "dateStr": date_str,
+        "timeStr": time_str,
+        "ranking": rows,
+        "viewer":  viewer_rows,
+    }
+    filepath.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(f"  ✅ JSON 저장: {filepath}")
+
+    # git commit & push
+    try:
+        subprocess.run(["git", "config", "user.name", "github-actions"], check=True)
+        subprocess.run(["git", "config", "user.email", "actions@github.com"], check=True)
+        subprocess.run(["git", "add", str(filepath)], check=True)
+        subprocess.run(["git", "commit", "-m", f"data: {date_str} {time_str}"], check=True)
+        subprocess.run(["git", "push"], check=True)
+        print(f"  ✅ git push 완료")
+    except subprocess.CalledProcessError as e:
+        print(f"  ⚠️ git push 실패 (JSON은 저장됨): {e}")
+
+
 def main():
     if not GAS_WEB_APP_URL:
         print("❌ GAS_WEB_APP_URL 환경변수가 없습니다.")
@@ -201,6 +233,10 @@ def main():
         print("❌ 수집된 데이터 없음")
         sys.exit(1)
 
+    # ── 1) JSON 파일로 저장 (원본 데이터 보존) ──
+    save_json(date_str, time_str, all_rows, viewer_rows)
+
+    # ── 2) GAS 전송 (스프레드시트 업데이트) ──
     print(f"\n  GAS 전송 중... (랭킹 {len(all_rows)}건 + 뷰어 {len(viewer_rows)}건)")
     payload = {"secret": SECRET, "dateStr": date_str, "timeStr": time_str,
                "rows": all_rows, "viewerRows": viewer_rows}
@@ -210,17 +246,17 @@ def main():
             resp = requests.post(GAS_WEB_APP_URL, json=payload, timeout=180)
             result = resp.json()
             if result.get("ok"):
-                print(f"  ✅ 저장 완료: 랭킹 {result.get('saved')}건 / 뷰어 {result.get('viewerSaved')}건")
+                print(f"  ✅ GAS 저장 완료: 랭킹 {result.get('saved')}건 / 뷰어 {result.get('viewerSaved')}건")
                 break
             else:
                 print(f"  ⚠️ GAS 오류 (시도 {attempt}/{max_retries}): {result.get('error')}")
                 if attempt == max_retries:
-                    sys.exit(1)
+                    print("  ⚠️ GAS 전송 실패 — JSON은 저장됨")
                 time.sleep(10 * attempt)
         except Exception as e:
             print(f"  ⚠️ 전송 실패 (시도 {attempt}/{max_retries}): {e}")
             if attempt == max_retries:
-                sys.exit(1)
+                print("  ⚠️ GAS 전송 실패 — JSON은 저장됨")
             time.sleep(10 * attempt)
 
 
